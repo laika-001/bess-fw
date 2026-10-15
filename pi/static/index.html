@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BESS Module Monitor</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --good-text: #006300;
+  --wash: rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --good-text: #0ca30c;
+    --wash: rgba(255,255,255,0.05);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255,255,255,0.10);
+  --series-1: #3987e5;
+  --good-text: #0ca30c;
+  --wash: rgba(255,255,255,0.05);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.meta { color: var(--text-secondary); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.meta b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surface-1); font-weight: 600; font-size: 13px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+button.ghost { font: inherit; font-size: 13px; color: var(--text-secondary); background: none; border: 1px solid var(--border);
+               border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+button.ghost:hover { background: var(--wash); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.grid { display: grid; gap: 12px; }
+.alerts-row { grid-template-columns: 2fr 1fr; margin-bottom: 12px; }
+@media (max-width: 800px) { .alerts-row { grid-template-columns: 1fr; } }
+
+.alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
+.alert:first-of-type { border-top: 0; padding-top: 2px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+         letter-spacing: .03em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); white-space: nowrap; flex: none; }
+.badge svg { width: 13px; height: 13px; }
+.alert .title { font-weight: 600; }
+.alert .detail, .alert .since { color: var(--text-secondary); font-size: 13px; }
+.allclear { display: flex; align-items: center; gap: 10px; color: var(--good-text); font-weight: 600; padding: 4px 0; }
+.events { max-height: 210px; overflow: auto; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.events li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; padding: 5px 0; border-top: 1px solid var(--border); }
+.events li span:last-child { flex: 1 1 160px; min-width: 0; }
+.events .badge { border: 0; padding: 0; font-size: 11px; align-self: center; }
+.events li:first-child { border-top: 0; }
+.events time { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+
+.hero { display: grid; grid-template-columns: minmax(260px, 1.1fr) 2fr; gap: 20px; align-items: center;
+        border-left: 6px solid var(--st); margin-bottom: 12px; }
+@media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+.hero h2 { margin-bottom: 4px; }
+.hero .big { font-size: 52px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.hero .big small { font-size: 18px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; letter-spacing: 0; }
+.hero .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px;
+               text-transform: uppercase; letter-spacing: .03em; margin: 6px 0 2px; }
+.hero .state svg { width: 16px; height: 16px; }
+.hero .why { color: var(--text-secondary); font-size: 13px; }
+.hero .gauge { height: 12px; margin: 14px 0 6px; }
+.hero .gauge .track { height: 12px; border-radius: 6px; }
+.hero .gauge .mark { top: -4px; height: 20px; width: 5px; }
+.hero .scale { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 11.5px; }
+.hero .stats { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+.hero .stats b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.hero .spark { position: relative; height: 70px; margin-top: 6px; }
+.hero .spark canvas { width: 100%; height: 100%; display: block; }
+.tiles { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 12px; }
+@media (max-width: 480px) { .tiles { grid-template-columns: 1fr 1fr; } .tile .value { font-size: 24px; } }
+.tile { border-left: 5px solid var(--st); padding-left: 12px; }
+.tile .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.tile .label { color: var(--text-secondary); font-size: 13px; }
+.tile .state { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
+               text-transform: uppercase; letter-spacing: .03em; color: var(--text-secondary); white-space: nowrap; }
+.tile .state svg { width: 13px; height: 13px; flex: none; }
+.tile .value { font-size: 28px; font-weight: 650; margin: 2px 0 0; letter-spacing: -0.01em; }
+.tile .unit { font-size: 15px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+.tile .sub { color: var(--text-muted); font-size: 12px; min-height: 17px; }
+.gauge { position: relative; margin: 10px 0 6px; height: 8px; }
+.gauge .track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.gauge .z { height: 100%; }
+.gauge .z.good { background: color-mix(in srgb, var(--good) 45%, transparent); }
+.gauge .z.warning { background: color-mix(in srgb, var(--warning) 55%, transparent); }
+.gauge .z.critical { background: color-mix(in srgb, var(--critical) 55%, transparent); }
+.gauge .z.neutral { background: var(--grid); }
+.gauge .mark { position: absolute; top: -4px; width: 4px; height: 16px; margin-left: -2px; border-radius: 2px;
+               background: var(--text-primary); box-shadow: 0 0 0 2px var(--surface-1); }
+.gauge .mark[hidden] { display: none; }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 13px; background: var(--surface-1); color: var(--text-secondary); border: 0;
+              border-left: 1px solid var(--border); padding: 4px 12px; cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--wash); color: var(--text-primary); font-weight: 650; }
+.charts { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.chart h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.chart .note { color: var(--text-muted); font-size: 12px; margin: 0 0 6px; }
+.chart .wrap { position: relative; height: 150px; }
+.chart canvas { display: block; width: 100%; height: 100%; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+       border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+       white-space: nowrap; display: none; z-index: 2; }
+.tip b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.tip span { color: var(--text-secondary); }
+.empty { color: var(--text-muted); font-size: 13px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.empty[hidden] { display: none; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 5px 8px; border-top: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; border-top: 0; }
+th:first-child, td:first-child { text-align: left; }
+.tablewrap { overflow-x: auto; }
+footer { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>BESS Module Monitor</h1>
+    <span class="pill" id="link"><span class="dot" id="linkdot"></span><span id="linktext">Connecting…</span></span>
+    <div class="meta">
+      <span>Last frame <b id="age">–</b></span>
+      <span>Module uptime <b id="uptime">–</b></span>
+      <span>Frame <b id="seq">–</b></span>
+    </div>
+    <span class="spacer"></span>
+    <button class="ghost" id="theme" title="Switch light / dark">Theme</button>
+  </header>
+
+  <section class="card hero" id="hero" aria-label="Anomaly score">
+    <div>
+      <h2>Anomaly score · on-board autoencoder</h2>
+      <div class="big" id="heroval">–</div>
+      <div class="state" id="herostate"></div>
+      <div class="why" id="herowhy"></div>
+    </div>
+    <div>
+      <div class="gauge" aria-hidden="true"><div class="track">
+        <div class="z good" style="width:25%"></div><div class="z warning" style="width:50%"></div><div class="z critical" style="width:25%"></div>
+      </div><div class="mark" id="heromark" hidden></div></div>
+      <div class="scale"><span>0 %</span><span>100 % learned limit</span><span>300 % very unusual</span><span>400 %+</span></div>
+      <div class="stats" id="herostats"></div>
+      <div class="spark"><canvas id="herospark" role="img" aria-label="Anomaly score, last hour"></canvas></div>
+    </div>
+  </section>
+
+  <section class="grid alerts-row">
+    <div class="card">
+      <h2>Active alerts</h2>
+      <div id="alerts"></div>
+    </div>
+    <div class="card">
+      <h2>Recent events</h2>
+      <ul class="events" id="events"></ul>
+    </div>
+  </section>
+
+  <section class="grid tiles" id="tiles" aria-label="Live readings"></section>
+
+  <div class="toolbar">
+    <h2 style="margin:0">Trends</h2><span style="color:var(--text-muted);font-size:12px">averaged, to hide sensor noise</span>
+    <span class="spacer"></span>
+    <div class="seg" role="group" aria-label="Time range" id="range">
+      <button data-min="60">1 h</button><button data-min="360" aria-pressed="true">6 h</button><button data-min="1440">24 h</button>
+    </div>
+    <button class="ghost" id="tabletoggle" aria-expanded="false">Show table</button>
+  </div>
+  <section class="grid charts" id="charts"></section>
+
+  <section class="card" id="tablecard" hidden style="margin-top:12px">
+    <h2>Latest averaged values (newest first)</h2>
+    <div class="tablewrap"><table id="table"></table></div>
+  </section>
+
+  <footer>
+    Data: MAX32630 module over UART at 115200 baud, one frame every 3 s. Air temperature is the TMP117 only.
+    IAQ, CO₂-eq and bVOC-eq are Bosch BSEC estimates derived from the BME688 gas resistance; the BME688 does not
+    measure CO₂. Gas readings are from the 320 °C heater step only. Tile colours follow the same rules as the alerts.
+    The anomaly score is computed on the module by an autoencoder trained on healthy data: it rates how unlike that
+    data the current rates of change are (temperature, gas, humidity, pressure), not the absolute levels.
+    <span id="stats"></span>
+  </footer>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ---- theme toggle (per-viewer convenience) ----
+(function () {
+  try { const t = localStorage.getItem("bess-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  $("theme").onclick = () => {
+    const cur = document.documentElement.dataset.theme ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("bess-theme", next); } catch (e) {}
+    drawAll();
+  };
+})();
+
+// ---- status icons (shape differs per level, so colour is never alone) ----
+const ICON = {
+  good: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="var(--good)"/><path d="M4.5 8.2l2.3 2.3 4.7-4.7" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
+  info: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="var(--text-muted)"/><rect x="7" y="7" width="2" height="5" rx="1" fill="#fff"/><circle cx="8" cy="4.6" r="1.2" fill="#fff"/></svg>',
+  pending: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="var(--text-muted)" stroke-width="1.8"/><path d="M8 4.5V8l2.4 1.6" stroke="var(--text-muted)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>',
+  stale: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="var(--text-muted)"/><path d="M5 8h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+  warning: '<svg viewBox="0 0 16 16"><path d="M8 1.5l7 12.5H1z" fill="var(--warning)"/><rect x="7.1" y="5.5" width="1.8" height="4.6" rx=".9" fill="#0b0b0b"/><circle cx="8" cy="12" r="1" fill="#0b0b0b"/></svg>',
+  serious: '<svg viewBox="0 0 16 16"><path d="M8 1l7 7-7 7-7-7z" fill="var(--serious)"/><rect x="7.1" y="4.3" width="1.8" height="5" rx=".9" fill="#fff"/><circle cx="8" cy="11.4" r="1" fill="#fff"/></svg>',
+  critical: '<svg viewBox="0 0 16 16"><path d="M5 1h6l4 4v6l-4 4H5l-4-4V5z" fill="var(--critical)"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+};
+const LEVEL_LABEL = { info: "Info", warning: "Warning", serious: "Serious", critical: "Critical", good: "OK", pending: "Waiting", stale: "No data" };
+const STATE_COLOR = { good: "var(--good)", warning: "var(--warning)", serious: "var(--serious)", critical: "var(--critical)",
+                      pending: "var(--axis)", stale: "var(--axis)" };
+const badge = (lvl) => `<span class="badge">${ICON[lvl] || ICON.info}${LEVEL_LABEL[lvl] || lvl}</span>`;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---- formatting ----
+const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function dur(sec) {
+  if (sec == null) return "–";
+  sec = Math.max(0, Math.floor(sec));
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+const ago = (sec) => sec == null ? "–" : sec < 60 ? `${sec.toFixed(0)} s ago` : `${dur(sec)} ago`;
+
+// ---- tiles: value + status (icon + label + colour) + gauge against the alert limits ----
+// zones(th) -> [[from, to, level], ...] on the gauge's scale; value(f, s) -> number on that scale.
+const ACC = ["stabilising", "low accuracy", "medium accuracy", "calibrated"];
+const up = (lo, hi, w, c) => [[lo, w, "good"], [w, c, "warning"], [c, hi, "critical"]];
+const TILES = [
+  { key: "t117_C", label: "Air temperature", unit: "°C", d: 2, min: 0, max: 70,
+    zones: (t) => up(0, 70, t.t117_warn_c, t.t117_crit_c),
+    sub: (f, s, t) => `TMP117 · warn ${t.t117_warn_c} · crit ${t.t117_crit_c} °C` },
+  { key: "dp_Pa", label: "Enclosure pressure", unit: "Pa", d: 1, min: -250, max: 250,
+    zones: (t) => [[-250, -t.dp_crit_pa, "critical"], [-t.dp_crit_pa, -t.dp_warn_pa, "warning"], [-t.dp_warn_pa, t.dp_warn_pa, "good"],
+                   [t.dp_warn_pa, t.dp_crit_pa, "warning"], [t.dp_crit_pa, 250, "critical"]],
+    sub: (f, s, t) => `ABP2 gauge · limits ±${t.dp_warn_pa} / ±${t.dp_crit_pa} Pa` },
+  { key: "gas_ohm", label: "Gas resistance", unit: "kΩ", d: 1, scale: 1e-3, min: 0, max: 150,
+    gaugeValue: (f, s) => s.gas_ratio == null ? null : s.gas_ratio * 100,
+    zones: (t) => [[0, t.gas_ratio_crit * 100, "critical"], [t.gas_ratio_crit * 100, t.gas_ratio_warn * 100, "warning"], [t.gas_ratio_warn * 100, 150, "good"]],
+    sub: (f, s) => s.gas_ratio == null ? "waiting for a 320 °C reading"
+      : `${Math.round(s.gas_ratio * 100)} % of clean-air level (${(s.gas_ref / 1000).toFixed(1)} kΩ) · lower is worse` },
+  { key: "iaq", label: "Air quality (IAQ)", unit: "", d: 0, min: 0, max: 500, pending: "Calibrating",
+    zones: (t) => up(0, 500, t.iaq_warn, t.iaq_crit),
+    sub: (f) => `BSEC estimate · ${f && f.iaq_acc != null ? ACC[f.iaq_acc] : "–"}${f && !f.iaq_acc ? " (accuracy restarts at each boot)" : ""}` },
+  { key: "co2eq_ppm", label: "CO₂ equivalent", unit: "ppm", d: 0, min: 400, max: 3000, pending: "Calibrating",
+    zones: (t) => up(400, 3000, t.co2eq_warn_ppm, t.co2eq_crit_ppm),
+    sub: () => "estimate from VOCs, not measured CO₂" },
+  { key: "bvoc_ppm", label: "Breath-VOC equivalent", unit: "ppm", d: 2, min: 0, max: 8, pending: "Calibrating",
+    zones: (t) => up(0, 8, t.bvoc_warn_ppm, t.bvoc_crit_ppm),
+    sub: () => "BSEC estimate" },
+  { key: "rh_pct", label: "Relative humidity", unit: "%", d: 1, min: 0, max: 100,
+    zones: (t) => [[0, t.rh_warn_pct, "good"], [t.rh_warn_pct, 100, "warning"]],
+    sub: (f, s, t) => `BME688 · warn ${t.rh_warn_pct} %` },
+  { key: "p_Pa", label: "Barometric pressure", unit: "hPa", d: 1, scale: 0.01, min: 900, max: 1050,
+    zones: () => [[900, 1050, "neutral"]],
+    sub: () => "BME688 · weather, no limits · colour = sensor health" },
+];
+function gaugeHTML(t, th, v) {
+  const span = t.max - t.min;
+  const zones = t.zones(th).map(([a, b, lvl]) => {
+    const w = (Math.min(b, t.max) - Math.max(a, t.min)) / span * 100;
+    return w > 0 ? `<div class="z ${lvl}" style="width:${w}%"></div>` : "";
+  }).join("");
+  const pos = v == null ? null : Math.max(0, Math.min(100, (v - t.min) / span * 100));
+  return `<div class="gauge" aria-hidden="true"><div class="track">${zones}</div>
+    <div class="mark" ${pos == null ? "hidden" : `style="left:${pos}%"`}></div></div>`;
+}
+function renderTiles(s) {
+  const f = s.latest, th = s.thresholds;
+  $("tiles").innerHTML = TILES.map((t) => {
+    const raw = f ? f[t.key] : null;
+    const v = raw == null ? null : raw * (t.scale || 1);
+    const st = (s.tiles && s.tiles[t.key]) || (raw == null ? "stale" : "pending");
+    const gv = t.gaugeValue ? t.gaugeValue(f, s) : v;
+    return `<div class="card tile" style="--st:${STATE_COLOR[st]}">
+      <div class="top"><span class="label">${t.label}</span><span class="state">${ICON[st]}${st === "pending" && t.pending ? t.pending : LEVEL_LABEL[st]}</span></div>
+      <div class="value">${fmt(v, t.d)}${v == null || !t.unit ? "" : `<span class="unit">${t.unit}</span>`}</div>
+      ${gaugeHTML(t, th, gv)}
+      <div class="sub">${esc(t.sub(f, s, th))}</div></div>`;
+  }).join("");
+}
+
+// ---- anomaly hero ----
+const WARMUP_MS = 30 * 60 * 1000;   // the on-board model's windows fill for 30 min after each module boot
+function renderHero(s) {
+  const f = s.latest, a = s.anomaly || {};
+  const st = (s.tiles && s.tiles.anomaly) || "stale";
+  $("hero").style.setProperty("--st", STATE_COLOR[st]);
+  const mark = $("heromark");
+  if (!f || !a.on_module) {
+    $("heroval").innerHTML = "–";
+    $("herostate").innerHTML = `${ICON.stale}${f ? "No on-board model" : "No data"}`;
+    $("herowhy").textContent = f ? "The module firmware doesn't send an anomaly score (protocol v3 needed)." : "Waiting for frames from the module.";
+    mark.hidden = true;
+  } else if (!a.ready) {
+    const left = Math.max(0, WARMUP_MS - f.up_ms) / 1000;
+    $("heroval").innerHTML = `${left > 60 ? Math.ceil(left / 60) : Math.ceil(left)}<small>${left > 60 ? "min" : "s"} to first score</small>`;
+    $("herostate").innerHTML = `${ICON.pending}Warming up`;
+    $("herowhy").textContent = "The module needs 30 minutes of readings after each boot before it can judge them (module booted " +
+      `${dur(f.up_ms / 1000)} ago).`;
+    mark.hidden = true;
+  } else {
+    const pct = a.ratio * 100;
+    $("heroval").innerHTML = `${fmt(pct, 0)}<small>% of learned limit</small>`;
+    const label = st === "critical" ? "Very unusual: alarm" : st === "warning" ? "Unusual: alarm" :
+                  pct > 100 ? "Above the limit (alarm after 15 s)" : "Normal";
+    $("herostate").innerHTML = `${ICON[pct > 100 && st === "good" ? "warning" : st] || ICON.good}${label}`;
+    $("herowhy").textContent = pct > 100
+      ? "The current combination of temperature, gas, humidity and pressure changes is unlike the healthy data the model learned."
+      : "The current rates of change look like the healthy data the model learned.";
+    mark.hidden = false;
+    mark.style.left = Math.min(100, pct / 4) + "%";
+  }
+  renderHeroStats();
+}
+function renderHeroStats() {
+  const now = Date.now() / 1000, pts = [];
+  if (hist && hist.anomaly) for (let i = 0; i < hist.t.length; i++)
+    if (hist.anomaly[i] != null && now - hist.t[i] <= 3600) pts.push([hist.t[i], hist.anomaly[i] * 100]);
+  const f = lastStatus && lastStatus.latest;   // the live frame: averages lag, the peak shouldn't
+  if (f && f.anomaly != null && (!pts.length || f.host_ts > pts[pts.length - 1][0])) pts.push([f.host_ts, f.anomaly * 100]);
+  const peak = pts.length ? pts.reduce((m, p) => p[1] > m[1] ? p : m) : null;
+  const over = pts.filter((p) => p[1] > 100).length;
+  $("herostats").innerHTML = peak
+    ? `<span>Peak last hour <b>${fmt(peak[1], 0)} %</b> at ${hhmm(peak[0])}</span><span>Intervals above limit <b>${over}</b> of ${pts.length}</span>`
+    : `<span>No scores in the last hour yet</span>`;
+  drawSpark(pts);
+}
+function drawSpark(pts) {
+  const cv = $("herospark"), ctx = cv.getContext("2d");
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const now = Date.now() / 1000, t0 = now - 3600;
+  const hi = Math.max(150, ...pts.map((p) => p[1]));
+  const X = (t) => (t - t0) / 3600 * (W - 4) + 2, Y = (v) => H - 14 - v / hi * (H - 20);
+  ctx.font = "11px system-ui, -apple-system, Segoe UI, sans-serif"; ctx.fillStyle = css("--text-muted");
+  ctx.textBaseline = "top"; ctx.textAlign = "left"; ctx.fillText("last hour", 2, H - 12);
+  ctx.textAlign = "right"; ctx.fillText("now", W - 2, H - 12);
+  ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5; ctx.strokeStyle = css("--warning");
+  ctx.beginPath(); ctx.moveTo(2, Math.round(Y(100)) + .5); ctx.lineTo(W - 2, Math.round(Y(100)) + .5); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(2, H - 13.5); ctx.lineTo(W - 2, H - 13.5); ctx.stroke();
+  if (pts.length < 2) return;
+  ctx.strokeStyle = css("--series-1"); ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+  let prev = null;
+  const gap = (hist && hist.bucket_s ? hist.bucket_s : 30) * 2.5;
+  for (const [t, v] of pts) { const x = X(t), y = Y(v); if (prev === null || t - prev > gap) ctx.moveTo(x, y); else ctx.lineTo(x, y); prev = t; }
+  ctx.stroke();
+}
+
+// ---- alerts & events ----
+function renderAlerts(s) {
+  const el = $("alerts");
+  if (!s.alerts.length) {
+    el.innerHTML = `<div class="allclear">${ICON.good.replace("<svg", '<svg width="18" height="18"')}All clear. Every reading is within limits and data is arriving.</div>`;
+  } else {
+    el.innerHTML = s.alerts.map((a) => `<div class="alert">${badge(a.level)}
+      <div><div class="title">${esc(a.title)}</div>
+      <div class="detail">${esc(a.detail || "")}</div>
+      <div class="since">since ${clock(a.since)} (${dur(s.now - a.since)})</div></div></div>`).join("");
+  }
+  $("events").innerHTML = s.events.length ? s.events.map((e) =>
+    `<li><time>${clock(e.ts)}</time>${badge(e.kind === "cleared" ? "good" : e.level)}<span>${esc(e.msg)}</span></li>`).join("")
+    : '<li style="color:var(--text-muted)">No events yet.</li>';
+}
+
+let lastStatus = null;
+function renderHeader(s) {
+  const ok = s.link.ok;
+  $("linkdot").style.background = ok ? "var(--good)" : "var(--critical)";
+  $("linktext").textContent = ok ? "Live" : (s.link.port_open ? "No data" : "Serial port closed");
+  const f = s.latest;
+  $("seq").textContent = f ? `#${f.seq}` : "–";
+  $("uptime").textContent = f ? dur(f.up_ms / 1000) : "–";
+  $("stats").textContent = ` Link: ${s.stats.frames} frames, ${s.stats.bad} corrupted, ${s.stats.lost} lost, ${s.stats.reboots} module reboots since the dashboard started.`;
+}
+function tickAge() {
+  if (!lastStatus) return;
+  const age = lastStatus.link.last_frame_age_s == null ? null :
+    lastStatus.link.last_frame_age_s + (Date.now() / 1000 - lastStatus._rx);
+  $("age").textContent = ago(age);
+}
+setInterval(tickAge, 1000);
+
+// ---- charts: averaged buckets, one series each, own axis with a minimum span ----
+// minSpan keeps sensor noise from filling the chart; limits draw the alert lines when in view.
+const CHARTS = [
+  { key: "anomaly", title: "Anomaly score", unit: "% of limit", d: 0, scale: 100, minSpan: 150,
+    note: "on-board autoencoder; peak per interval; 100 % = alarm limit", limits: () => [[100, "warning"], [300, "critical"]] },
+  { key: "t117_C", title: "Air temperature", unit: "°C", d: 2, note: "TMP117", minSpan: 4,
+    limits: (t) => [[t.t117_warn_c, "warning"], [t.t117_crit_c, "critical"]] },
+  { key: "dp_Pa", title: "Enclosure pressure", unit: "Pa", d: 1, note: "ABP2 gauge pressure", minSpan: 40, centerZero: true,
+    limits: (t) => [[t.dp_warn_pa, "warning"], [-t.dp_warn_pa, "warning"], [t.dp_crit_pa, "critical"], [-t.dp_crit_pa, "critical"]] },
+  { key: "gas_ohm", title: "Gas resistance", unit: "kΩ", d: 1, scale: 1e-3, note: "BME688, 320 °C step; drops when VOCs / H₂ / CO rise", minSpan: 40 },
+  { key: "iaq", title: "Air quality (IAQ)", unit: "", d: 0, note: "BSEC estimate, 0–500", minSpan: 100,
+    limits: (t) => [[t.iaq_warn, "warning"], [t.iaq_crit, "critical"]] },
+  { key: "co2eq_ppm", title: "CO₂ equivalent", unit: "ppm", d: 0, note: "BSEC estimate from VOCs", minSpan: 400,
+    limits: (t) => [[t.co2eq_warn_ppm, "warning"], [t.co2eq_crit_ppm, "critical"]] },
+  { key: "rh_pct", title: "Relative humidity", unit: "%", d: 1, note: "BME688", minSpan: 20,
+    limits: (t) => [[t.rh_warn_pct, "warning"]] },
+];
+const RANGES = { 60: { bucket: 30, tick: 600 }, 360: { bucket: 120, tick: 3600 }, 1440: { bucket: 600, tick: 3 * 3600 } };
+let hist = null, rangeMin = 360;
+try { const r = +localStorage.getItem("bess-range"); if (RANGES[r]) rangeMin = r; } catch (e) {}
+
+$("charts").innerHTML = CHARTS.map((c, i) => `<div class="card chart">
+  <h3>${c.title}${c.unit ? ` <span style="color:var(--text-muted);font-weight:500">(${c.unit})</span>` : ""}</h3>
+  <p class="note">${c.note}</p>
+  <div class="wrap"><canvas id="c${i}" role="img" aria-label="${c.title} trend"></canvas>
+  <div class="tip" id="tip${i}"></div><div class="empty" id="empty${i}" hidden>No data in this range yet</div></div></div>`).join("");
+
+function series(c) {
+  if (!hist) return [];
+  const pts = [];
+  for (let i = 0; i < hist.t.length; i++) {
+    const v = hist[c.key][i];
+    if (v != null) pts.push([hist.t[i], v * (c.scale || 1)]);
+  }
+  return pts;
+}
+function niceTicks(lo, hi, n = 4) {
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const step0 = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step, ticks = [];
+  for (let v = a; v <= b + step / 2; v += step) ticks.push(+v.toFixed(10));
+  return { lo: a, hi: b, ticks, step };
+}
+const geo = [];
+function draw(i) {
+  const c = CHARTS[i], cv = $(`c${i}`), ctx = cv.getContext("2d");
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const pts = series(c);
+  $(`empty${i}`).hidden = pts.length > 1;
+  geo[i] = null;
+  if (pts.length < 2) return;
+  const now = Date.now() / 1000, t0 = now - rangeMin * 60, bucket = RANGES[rangeMin].bucket;
+  // y range: data range, widened to at least minSpan around its middle
+  let lo = Infinity, hi = -Infinity;
+  for (const [t, v] of pts) if (t >= t0) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (!isFinite(lo)) return;
+  if (c.centerZero) { const m = Math.max(Math.abs(lo), Math.abs(hi), c.minSpan / 2); lo = -m; hi = m; }
+  else if (hi - lo < c.minSpan) { const mid = (hi + lo) / 2; lo = mid - c.minSpan / 2; hi = mid + c.minSpan / 2; }
+  const yt = niceTicks(lo, hi);
+  const decimals = Math.max(0, Math.min(3, -Math.floor(Math.log10(yt.step))));
+  ctx.font = "11px system-ui, -apple-system, Segoe UI, sans-serif";
+  const labW = Math.max(...yt.ticks.map((v) => ctx.measureText(v.toFixed(decimals)).width)) + 8;
+  const L = labW, R = W - 6, T = 6, B = H - 20;
+  const X = (t) => L + (t - t0) / (now - t0) * (R - L);
+  const Y = (v) => B - (v - yt.lo) / (yt.hi - yt.lo) * (B - T);
+  // grid + y labels
+  ctx.strokeStyle = css("--grid"); ctx.fillStyle = css("--text-muted"); ctx.lineWidth = 1;
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of yt.ticks) {
+    const y = Math.round(Y(v)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(R, y); ctx.stroke();
+    ctx.fillText(v.toFixed(decimals), L - 6, y);
+  }
+  // alert limit lines, only when they fall inside the view (they never stretch the axis)
+  if (c.limits && lastStatus) {
+    ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+    for (const [v, lvl] of c.limits(lastStatus.thresholds)) {
+      if (v < yt.lo || v > yt.hi) continue;
+      const y = Math.round(Y(v)) + 0.5;
+      ctx.strokeStyle = css(`--${lvl}`);
+      ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(R, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  // baseline + time labels
+  ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(L, B + 0.5); ctx.lineTo(R, B + 0.5); ctx.stroke();
+  ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = css("--text-muted");
+  const tstep = RANGES[rangeMin].tick;
+  for (let t = Math.ceil(t0 / tstep) * tstep; t <= now; t += tstep) {
+    const x = X(t);
+    if (x < L + 18 || x > R - 18) continue;
+    ctx.fillText(hhmm(t), x, B + 5);
+  }
+  // line: 2px, broken where buckets are missing (link loss / reboot)
+  ctx.strokeStyle = css("--series-1"); ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.beginPath();
+  let prev = null;
+  for (const [t, v] of pts) {
+    if (t < t0) continue;
+    const x = X(t), y = Y(v);
+    if (prev === null || t - prev > bucket * 2.5) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    prev = t;
+  }
+  ctx.stroke();
+  const [lt, lv] = pts[pts.length - 1];
+  ctx.beginPath(); ctx.arc(X(lt), Y(lv), 4, 0, 2 * Math.PI);
+  ctx.fillStyle = css("--series-1"); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = css("--surface-1"); ctx.stroke();
+  geo[i] = { pts: pts.filter((p) => p[0] >= t0), X, Y, L, R, T, B };
+}
+function drawAll() { CHARTS.forEach((_, i) => draw(i)); if (lastStatus) renderHeroStats(); }
+
+// hover: crosshair + tooltip, hit area is the whole plot
+CHARTS.forEach((c, i) => {
+  const cv = $(`c${i}`), tip = $(`tip${i}`);
+  cv.addEventListener("mouseleave", () => { tip.style.display = "none"; draw(i); });
+  cv.addEventListener("mousemove", (ev) => {
+    const g = geo[i]; if (!g || !g.pts.length) return;
+    const rect = cv.getBoundingClientRect(), mx = ev.clientX - rect.left;
+    let best = g.pts[0], bd = Infinity;
+    for (const p of g.pts) { const d = Math.abs(g.X(p[0]) - mx); if (d < bd) { bd = d; best = p; } }
+    draw(i);
+    const ctx = cv.getContext("2d"), x = g.X(best[0]), y = g.Y(best[1]);
+    ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, g.T); ctx.lineTo(Math.round(x) + 0.5, g.B); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+    ctx.fillStyle = css("--series-1"); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = css("--surface-1"); ctx.stroke();
+    const b = RANGES[rangeMin].bucket;
+    tip.innerHTML = `<b>${fmt(best[1], c.d)}${c.unit ? " " + c.unit : ""}</b><br><span>${hhmm(best[0] - b / 2)}–${hhmm(best[0] + b / 2)} average</span>`;
+    tip.style.display = "block";
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.min(Math.max(x + 10, 0), cv.clientWidth - tw) + "px";
+    tip.style.top = Math.max(y - 44, 0) + "px";
+  });
+});
+window.addEventListener("resize", drawAll);
+
+// range filter
+function setRange(min) {
+  rangeMin = min;
+  try { localStorage.setItem("bess-range", String(min)); } catch (e) {}
+  document.querySelectorAll("#range button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.min === min)));
+  loadHistory();
+}
+document.querySelectorAll("#range button").forEach((b) => (b.onclick = () => setRange(+b.dataset.min)));
+document.querySelectorAll("#range button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.min === rangeMin)));
+
+async function loadHistory() {
+  try {
+    const r = await fetch(`/api/history?minutes=${rangeMin}&bucket=${RANGES[rangeMin].bucket}`);
+    hist = await r.json();
+    drawAll(); renderTable(); renderHeroStats();
+  } catch (e) { /* retried on the next refresh */ }
+}
+// averaged history refreshes on a timer; tiles and alerts update on every frame
+(function refresh() { setTimeout(() => { loadHistory(); refresh(); }, Math.max(15, RANGES[rangeMin].bucket / 2) * 1000); })();
+
+// ---- table view (the averaged values behind the charts) ----
+const TCOLS = [["Time", null], ["Air °C", "t117_C", 2], ["dP Pa", "dp_Pa", 1], ["Gas kΩ", "gas_ohm", 1, 1e-3], ["IAQ", "iaq", 0],
+  ["CO₂-eq ppm", "co2eq_ppm", 0], ["bVOC-eq ppm", "bvoc_ppm", 2], ["RH %", "rh_pct", 1], ["hPa", "p_Pa", 1, 0.01]];
+function renderTable() {
+  if ($("tablecard").hidden || !hist) return;
+  const n = hist.t.length, rows = [];
+  for (let i = n - 1; i >= Math.max(0, n - 30); i--) {
+    rows.push("<tr>" + TCOLS.map(([, k, d, s]) => k === null ? `<td>${hhmm(hist.t[i])}</td>` :
+      `<td>${hist[k] && hist[k][i] != null ? fmt(hist[k][i] * (s || 1), d) : "–"}</td>`).join("") + "</tr>");
+  }
+  $("table").innerHTML = "<tr>" + TCOLS.map(([h]) => `<th>${h}</th>`).join("") + "</tr>" + rows.join("");
+}
+$("tabletoggle").onclick = () => {
+  const card = $("tablecard"); card.hidden = !card.hidden;
+  $("tabletoggle").textContent = card.hidden ? "Show table" : "Hide table";
+  $("tabletoggle").setAttribute("aria-expanded", String(!card.hidden));
+  renderTable();
+};
+
+// ---- live updates ----
+function apply(s) {
+  s._rx = Date.now() / 1000;
+  const first = !lastStatus;
+  lastStatus = s;
+  renderHeader(s); renderHero(s); renderAlerts(s); renderTiles(s); tickAge();
+  if (first) drawAll();  // limit lines need the thresholds
+}
+fetch("/api/status").then((r) => r.json()).then(apply).catch(() => {});
+loadHistory();
+const es = new EventSource("/api/events");
+es.addEventListener("frame", (ev) => apply(JSON.parse(ev.data)));
+es.onerror = () => { $("linkdot").style.background = "var(--critical)"; $("linktext").textContent = "Dashboard offline"; };
+</script>
+</body>
+</html>

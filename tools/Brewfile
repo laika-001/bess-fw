@@ -1,0 +1,5 @@
+# Toolchain for the BESS firmware. Install with: brew bundle --file tools/Brewfile
+# Versions this was last built with: gcc-arm-embedded 15.3.rel1, cmake 4.4.3, ninja 1.13.2.
+brew "cmake"
+brew "ninja"
+cask "gcc-arm-embedded"

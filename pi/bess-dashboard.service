@@ -1,0 +1,24 @@
+# BESS dashboard: reads the MAX32630 module on UART0 (/dev/ttyAMA0) and serves
+# the web UI on 127.0.0.1:8080 (nginx publishes it on ports 80 and 443).
+# Source: bess-fw/pi/bess-dashboard.service, installed by pi/deploy.sh.
+[Unit]
+Description=BESS dashboard (MAX32630 data link on UART0)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/bess-dashboard/bess_dashboard.py --config /opt/bess-dashboard/config.json
+# No login account: a transient system user that can only use the serial port
+# and its own state directory (/var/lib/bess-dashboard: daily CSVs + events.jsonl).
+DynamicUser=yes
+SupplementaryGroups=dialout
+StateDirectory=bess-dashboard
+Restart=always
+RestartSec=3
+# This Pi browns out under heavy load: keep the service light and low priority.
+Nice=5
+MemoryMax=150M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

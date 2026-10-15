@@ -1,0 +1,26 @@
+{
+  "serial_port": "/dev/ttyAMA0",
+  "baud": 115200,
+  "http_host": "127.0.0.1",
+  "http_port": 8080,
+  "history_minutes": 1440,
+  "thresholds": {
+    "t117_warn_c": 45.0,
+    "t117_crit_c": 60.0,
+    "t_rise_warn_c_per_min": 1.0,
+    "dp_warn_pa": 50.0,
+    "dp_crit_pa": 200.0,
+    "gas_ref_ohm": 63100.0,
+    "gas_ratio_warn": 0.6,
+    "gas_ratio_crit": 0.35,
+    "gas_ref_track_hours": 24.0,
+    "iaq_warn": 150.0,
+    "iaq_crit": 250.0,
+    "co2eq_warn_ppm": 1000.0,
+    "co2eq_crit_ppm": 2000.0,
+    "bvoc_warn_ppm": 2.0,
+    "bvoc_crit_ppm": 5.0,
+    "rh_warn_pct": 85.0,
+    "bad_frames_per_min_warn": 3
+  }
+}
