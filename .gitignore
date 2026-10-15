@@ -17,6 +17,7 @@ __pycache__/
 .history/
 
 # KiCad
+*.kicad_pcb
 *.lck
 *-backups/
 fp-info-cache
