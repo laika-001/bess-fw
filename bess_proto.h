@@ -1,14 +1,14 @@
-// BESS data frame, protocol v3. No mbed or printf dependencies, so the same
+// BESS data frame, protocol v4. No mbed or printf dependencies, so the same
 // code is unit-tested on a PC.
 //
 // One ASCII line per sensor cycle (3 s, timed by BSEC), sent on the same serial
 // port as the debug text. Receivers keep lines starting with "$BESS," and ignore the rest.
 //
 //   $BESS,<ver>,<seq>,<up_ms>,<flags>,<t117_cC>,<dp_cPa>,<tabp_cC>,<tbme_cC>,<p_Pa>,<rh_cP>,<gas_ohm>,
-//         <heat_c>,<iaq_c>,<iaq_acc>,<siaq_c>,<co2eq_cppm>,<bvoc_ppb>,<bsec_st>,<anom_pct>*<crc>\r\n
+//         <heat_c>,<iaq_c>,<iaq_acc>,<siaq_c>,<co2eq_cppm>,<bvoc_ppb>,<bsec_st>,<rules>*<crc>\r\n
 //
-//   ver      protocol version (3). v1 frames (before BSEC) end after gas_ohm,
-//            v2 frames (before the on-board autoencoder) after bsec_st.
+//   ver      protocol version (4). v1 frames (before BSEC) end after gas_ohm,
+//            v2 after bsec_st, v3 had an autoencoder score where v4 has rules.
 //   seq      frame counter, 0 at boot. A gap means lost frames; a drop back to 0 means a reboot
 //   up_ms    milliseconds since the sensor loop started (~0.1 s after reset)
 //   flags    4 hex digits, see Flag below
@@ -30,10 +30,12 @@
 //   bvoc_ppb    breath-VOC-equivalent, ppb (estimate)
 //   bsec_st     bit 0 = stabilisation done, bit 1 = run-in done
 //   The six BSEC fields are empty in cycles where BSEC gave no output.
-//   --- v3: on-board anomaly autoencoder (anomaly.h) ---
-//   anom_pct    reconstruction error as % of the learned limit (100 = limit). Empty
-//               during the 30-min warm-up after boot. Flag F_LOCAL_ALARM is set once
-//               it stays above 100 for 5 frames, and clears after 10 frames below.
+//   --- v4: on-board threshold checks (rules.h, DETECTION.md) ---
+//   rules       4 hex digits: bit 0 gas low, 1 gas critical, 2 pressure, 3 pressure
+//               critical, 4 temperature high, 5 temperature critical, 6 temperature
+//               rising fast, 7 gas drifting low for an hour, 8 possible battery event
+//               (two channels within a minute, or temperature critical; also sets
+//               F_LOCAL_ALARM).
 //   crc      CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) over every byte
 //            between '$' and '*', exclusive, as 4 uppercase hex digits
 //
@@ -47,7 +49,7 @@
 
 namespace bess {
 
-static const int PROTO_VERSION = 3;
+static const int PROTO_VERSION = 4;
 static const size_t FRAME_MAX = 224;
 
 enum Flag : uint16_t {
@@ -56,7 +58,7 @@ enum Flag : uint16_t {
     F_BME_FAIL    = 0x0004,  // BME688 measurement failed this cycle
     F_GAS_INVALID = 0x0008,  // gas measured, but valid / heater-stable bit not set
     F_WDT_BOOT    = 0x0010,  // this boot followed a watchdog reset
-    F_LOCAL_ALARM = 0x0020,  // on-board anomaly autoencoder alarm (see anom_pct)
+    F_LOCAL_ALARM = 0x0020,  // possible battery event (rules bit 8), decided on the module
     F_RELAY_OPEN  = 0x0040,  // dry-contact relay open (reserved)
     F_BSEC_ERR    = 0x0080,  // BSEC not running, or returned an error this cycle
 };
@@ -73,7 +75,7 @@ struct Sample {
     bool bsec_ok = false;                         // BSEC produced outputs this cycle
     int32_t iaq_c = 0; uint8_t iaq_acc = 0; int32_t siaq_c = 0;
     int32_t co2eq_cppm = 0; int32_t bvoc_ppb = 0; uint8_t bsec_st = 0;
-    bool anom_ok = false; int32_t anom_pct = 0;   // anomaly score, % of the learned limit
+    uint16_t rules = 0;                           // rules.h result bits
 };
 
 inline uint16_t crc16_ccitt(const char *p, size_t n)
@@ -158,7 +160,7 @@ inline size_t encode(const Sample &s, char *buf, size_t cap)
     w.ch(',');
     if (s.bsec_ok) w.u32(s.bsec_st);
     w.ch(',');
-    if (s.anom_ok) w.i32(s.anom_pct);
+    w.hex16(s.rules);
     uint16_t crc = crc16_ccitt(buf + 1, w.len() - 1);
     w.ch('*');
     w.hex16(crc);

@@ -4,7 +4,7 @@
 #include "pwrman_regs.h"
 #include "bess_proto.h"
 #include "bme_bsec.h"
-#include "anomaly.h"
+#include "rules.h"
 
 // BESS firmware: WDT0 watchdog + BME688, TMP117 and ABP2 over I2C.
 // BME688: Bosch BME68x Sensor API + Bosch BSEC2 (IAQ, CO2-eq, bVOC-eq), see bme_bsec.cpp.
@@ -16,11 +16,11 @@
 //
 // minimal-printf has no float support, so values print as fixed-point ints.
 //
-// Each cycle also sends one machine-readable "$BESS,..." frame (protocol v3,
+// Each cycle also sends one machine-readable "$BESS,..." frame (protocol v4,
 // see bess_proto.h) on the same serial port and to the Pi on UART2.
-// Anomaly detection runs here on the module (anomaly.h, model trained by
-// ml/train_autoencoder.py): its score goes in the frame, and F_LOCAL_ALARM is set
-// when it stays above the learned limit.
+// Threshold checks run here on the module (rules.h, see DETECTION.md): the
+// per-channel results go in the frame, and F_LOCAL_ALARM is set when two
+// channels trip within a minute (possible battery event).
 
 // RGB LED is open-drain, ACTIVE LOW. 0 = lit, 1 = off.
 // Green = healthy heartbeat. Red = starved (stands in for the relay opening).
@@ -43,7 +43,7 @@ static BufferedSerial pi_uart(PI_UART_SWAP ? P3_0 : P3_1, PI_UART_SWAP ? P3_1 : 
 
 static const uint8_t REG_CHIP_ID   = 0xD0;  // expect 0x61
 static bess::Sample smp;      // this cycle's readings, sent as one frame
-static anomaly::Detector anom; // on-board autoencoder (~45 KB of windows)
+static rules::Checker checker;  // on-board threshold checks
 static bool wdt_boot = false; // this boot followed a watchdog reset
 static int addr8;             // BME68x address found by probe()
 
@@ -476,22 +476,23 @@ int main()
         if (br.bsec_status) printf("  [BSEC status %d]", br.bsec_status);
         printf("  [heater %u C %u ms HR=%u]\r\n", br.heater_c, br.heater_ms, br.res_heat);
 
-        // On-board anomaly score, from exactly the values this frame carries
-        // (the model was trained on those, via the logs).
+        // On-board threshold checks, on exactly the values this frame carries.
         {
-            anomaly::Input ai;
-            ai.seq = smp.seq;
-            ai.up_ms = smp.up_ms;
-            ai.t_ok = smp.t117_ok; ai.t117 = smp.t117_cC / 100.0;
-            ai.dp_ok = smp.abp_ok; ai.dp = smp.dp_cPa / 100.0;
-            ai.gas_ok = smp.gas_ok; ai.gas = smp.gas_ohm; ai.heat_c = smp.heat_c;
-            ai.gas_invalid = smp.flags & bess::F_GAS_INVALID;
-            ai.rh_ok = smp.bme_ok; ai.rh = smp.rh_cP / 100.0;
-            if (anom.update(ai)) {
-                smp.anom_ok = true;
-                smp.anom_pct = bess::scaled(anom.ratio, 100.0f);
-                if (anom.alarm) smp.flags |= bess::F_LOCAL_ALARM;
-                printf("  anomaly %ld %%%s\r\n", (long)smp.anom_pct, anom.alarm ? " ALARM" : "");
+            rules::Input ri;
+            ri.seq = smp.seq;
+            ri.up_ms = smp.up_ms;
+            ri.t_ok = smp.t117_ok; ri.t117 = smp.t117_cC / 100.0;
+            ri.dp_ok = smp.abp_ok; ri.dp = smp.dp_cPa / 100.0;
+            ri.gas_ok = smp.gas_ok; ri.gas = smp.gas_ohm; ri.heat_c = smp.heat_c;
+            ri.gas_invalid = smp.flags & bess::F_GAS_INVALID;
+            smp.rules = checker.update(ri);
+            if (smp.rules & rules::EVENT) smp.flags |= bess::F_LOCAL_ALARM;
+            if (smp.rules) {
+                printf("  rules 0x%04X:%s%s%s%s%s\r\n", smp.rules,
+                       smp.rules & rules::EVENT ? " POSSIBLE BATTERY EVENT" : "",
+                       smp.rules & rules::GAS_WARN ? " gas" : "", smp.rules & rules::DP_WARN ? " pressure" : "",
+                       smp.rules & (rules::T_WARN | rules::T_RISE) ? " temperature" : "",
+                       smp.rules & rules::GAS_DRIFT ? " gas-drift" : "");
             }
         }
         // Sent before the fail checks: the last frame shows which sensor failed,

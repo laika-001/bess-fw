@@ -27,7 +27,7 @@ import sys
 import time
 from datetime import datetime
 
-PROTO_VERSIONS = (1, 2, 3)    # v2 adds the Bosch BSEC2 fields, v3 the on-board anomaly score
+PROTO_VERSIONS = (1, 2, 3, 4) # v2 adds BSEC2, v3 had an autoencoder score, v4 the on-board threshold results
 BOOT_BANNER = "=== BESS:"     # first line the firmware prints after every reset
 LINK_TIMEOUT_S = 6.0          # > 5.6 s watchdog reset period on the module
 
@@ -37,7 +37,7 @@ FLAGS = {
     0x0004: "BME_FAIL",
     0x0008: "GAS_INVALID",
     0x0010: "WDT_BOOT",
-    0x0020: "ANOMALY_ALARM",
+    0x0020: "BATTERY_EVENT",
     0x0040: "RELAY_OPEN",
     0x0080: "BSEC_ERR",
 }
@@ -65,8 +65,13 @@ FIELDS_V2 = FIELDS_V1 + [
 FIELDS_V3 = FIELDS_V2 + [
     ("anom_pct", 1, "%"),               # on-board autoencoder score, % of the learned limit
 ]
-FIELDS_BY_VERSION = {1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3}
-FIELDS_LATEST = FIELDS_V3
+FIELDS_V4 = FIELDS_V2 + [
+    ("rules", "hex", ""),               # rules.h result bits (see RULE_BITS)
+]
+FIELDS_BY_VERSION = {1: FIELDS_V1, 2: FIELDS_V2, 3: FIELDS_V3, 4: FIELDS_V4}
+FIELDS_LATEST = FIELDS_V4
+RULE_BITS = {0x0001: "GAS_LOW", 0x0002: "GAS_CRIT", 0x0004: "DP", 0x0008: "DP_CRIT", 0x0010: "T_HIGH",
+             0x0020: "T_CRIT", 0x0040: "T_RISE", 0x0080: "GAS_DRIFT", 0x0100: "BATTERY_EVENT"}
 CSV_COLUMNS = ["host_time", "ver", "seq", "up_ms", "flags"] + [f[0] for f in FIELDS_LATEST]
 
 
@@ -119,12 +124,14 @@ def parse_frame(line: str) -> dict:
     for (name, scale, _), raw in zip(fields, parts[5:]):
         if raw == "":
             out[name] = None
+        elif scale == "hex":
+            out[name] = int(raw, 16)
         elif isinstance(scale, int):
             out[name] = int(raw) * scale
         else:
             out[name] = round(int(raw) * scale, 3)
-    for name, _, _ in FIELDS_LATEST[len(fields):]:
-        out[name] = None  # older frame: fields it doesn't carry
+    for name, _, _ in FIELDS_LATEST:
+        out.setdefault(name, None)  # fields this frame version doesn't carry
     return out
 
 
@@ -203,7 +210,8 @@ class Sinks:
             return
         new = not os.path.exists(path) or os.path.getsize(path) == 0
         self.fcsv = open(path, "a", newline="")
-        self.writer = csv.DictWriter(self.fcsv, fieldnames=CSV_COLUMNS)
+        # extrasaction="ignore": fields of older protocol versions (e.g. v3 anom_pct) aren't columns now
+        self.writer = csv.DictWriter(self.fcsv, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         if new:
             self.writer.writeheader()
 
@@ -216,6 +224,8 @@ class Sinks:
         if self.writer:
             r = dict(f, host_time=datetime.now().isoformat(timespec="milliseconds"))
             r["flags"] = f"{f['flags']:04X}"
+            if r.get("rules") is not None:
+                r["rules"] = f"{r['rules']:04X}"
             self.writer.writerow(r)
             self.fcsv.flush()
             self.rows += 1
@@ -272,7 +282,7 @@ def main():
             sys.exit("No serial port found. Plug in the board or pass --port.")
     src = "stdin" if not live else (ser.port if ser else "(waiting for port)")
 
-    print(f"BESS rx: protocol v1/v2, source {src}" + (f", logging to {args.csv}" if args.csv else ""))
+    print(f"BESS rx: protocol v1-v4, source {src}" + (f", logging to {args.csv}" if args.csv else ""))
     sinks = Sinks(args.csv, args.log_dir)
     link = Link(start=time.time() if live else None)
     pending = b""
@@ -343,7 +353,8 @@ def main():
                       f"gas {fmt(f['gas_ohm'], 0)} ohm"
                       + (f" | IAQ {fmt(f['iaq'], 1)} acc {f['iaq_acc']}  CO2eq~{fmt(f['co2eq_ppm'], 0)} ppm"
                          f"  bVOC~{fmt(f['bvoc_ppm'], 2)} ppm" if f.get("iaq") is not None else "")
-                      + (f" | anomaly {f['anom_pct']} %" if f.get("anom_pct") is not None else "")
+                      + (" | rules " + "|".join(n for b, n in RULE_BITS.items() if f["rules"] & b)
+                         if f.get("rules") else "")
                       + f" | {flag_names(f['flags'])}")
     except KeyboardInterrupt:
         pass

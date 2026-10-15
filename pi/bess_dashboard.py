@@ -33,10 +33,13 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bess_rx import CSV_COLUMNS, FLAGS, LINK_TIMEOUT_S, FrameError, parse_frame  # noqa: E402
 
-# The anomaly autoencoder runs ON THE MODULE (firmware anomaly.h). Frames carry
-# its score (anom_pct, % of the learned limit) and the alarm flag 0x0020; the
-# dashboard only displays them.
-F_ANOMALY = 0x0020
+# Gas, pressure and temperature are judged ON THE MODULE (firmware rules.h, see
+# DETECTION.md). Frames carry the result bits (field "rules") and flag 0x0020 for
+# a possible battery event; the dashboard shows them and doesn't re-judge those
+# channels. The numbers it displays come from rules.h via rules.json (pi/deploy.sh).
+F_EVENT = 0x0020
+R_GAS_WARN, R_GAS_CRIT, R_DP_WARN, R_DP_CRIT = 0x0001, 0x0002, 0x0004, 0x0008
+R_T_WARN, R_T_CRIT, R_T_RISE, R_GAS_DRIFT, R_EVENT = 0x0010, 0x0020, 0x0040, 0x0080, 0x0100
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -48,13 +51,6 @@ DEFAULTS = {
     "log_dir": os.environ.get("STATE_DIRECTORY", "/var/lib/bess-dashboard"),
     "history_minutes": 1440,
     "thresholds": {
-        "t117_warn_c": 45.0, "t117_crit_c": 60.0,          # air temperature
-        "t_rise_warn_c_per_min": 1.0,                       # TMP117 rise over 2 min
-        "dp_warn_pa": 50.0, "dp_crit_pa": 200.0,            # |enclosure gauge pressure|
-        # gas resistance judged against the sensor's clean-air level (320 C heater step):
-        "gas_ref_ohm": 63100.0,                             # median of the healthy night 2026-10-15 02:00-07:30
-        "gas_ratio_warn": 0.60, "gas_ratio_crit": 0.35,     # gas / clean-air level
-        "gas_ref_track_hours": 24.0,                        # follow slow sensor drift (0 = fixed reference)
         "iaq_warn": 150.0, "iaq_crit": 250.0,               # BSEC IAQ, only once accuracy >= 1
         "co2eq_warn_ppm": 1000.0, "co2eq_crit_ppm": 2000.0,  # BSEC estimate, accuracy >= 1
         "bvoc_warn_ppm": 2.0, "bvoc_crit_ppm": 5.0,          # BSEC estimate, accuracy >= 1
@@ -67,7 +63,7 @@ LEVELS = {"info": 0, "warning": 1, "serious": 2, "critical": 3}
 
 # What the dashboard charts. Air temperature is the TMP117 only; the BME688 chip
 # and ABP2 die temperatures stay in the CSV logs but are not shown.
-HIST_KEYS = ["seq", "t117_C", "dp_Pa", "gas_ohm", "iaq", "iaq_acc", "co2eq_ppm", "bvoc_ppm", "rh_pct", "p_Pa", "anomaly"]
+HIST_KEYS = ["seq", "t117_C", "dp_Pa", "gas_ohm", "iaq", "iaq_acc", "co2eq_ppm", "bvoc_ppm", "rh_pct", "p_Pa"]
 
 
 def hist_row(f):
@@ -87,6 +83,12 @@ def load_config(path):
         th = user.pop("thresholds", {})
         cfg.update(user)
         cfg["thresholds"].update(th)
+    # The module's thresholds (generated from rules.h at deploy). They are for
+    # display; the module makes the decisions. Never overridden by config.json.
+    rules_path = os.path.join(HERE, "rules.json")
+    if os.path.exists(rules_path):
+        with open(rules_path) as f:
+            cfg["thresholds"].update(json.load(f))
     return cfg
 
 
@@ -103,9 +105,6 @@ class Hub:
         self.link_ok = False
         self.port_open = False
         self.history = deque(maxlen=int(cfg["history_minutes"] * 60 / 2.5))  # (ts, hist_row)
-        self.gas_ref = self._load_gas_ref()     # clean-air reference, ohm (tracks slow drift)
-        self._gas_ref_saved = time.time()
-        self._gas_last_ts = None
         self.bad_times = deque(maxlen=200)
         self.stats = {"frames": 0, "bad": 0, "lost": 0, "reboots": 0}
         self.last_seq = None
@@ -136,11 +135,10 @@ class Hub:
                         if ts < cutoff:
                             continue
                         f = {}
-                        for k in HIST_KEYS + ["heat_c", "up_ms", "anom_pct"]:
+                        for k in HIST_KEYS + ["heat_c", "up_ms"]:
                             v = r.get(k, "")
                             f[k] = None if v in ("", None) else float(v)
                         f["flags"] = int(r.get("flags") or "0", 16)
-                        f["anomaly"] = None if f["anom_pct"] is None else f["anom_pct"] / 100.0
                         row = hist_row(f)
                         self.history.append((ts, row))
                         n += 1
@@ -221,28 +219,6 @@ class Hub:
             changed |= self._raise("bsec", "warning", "BSEC not running", "IAQ / CO2-eq estimates unavailable")
         else:
             changed |= self._clear("bsec")
-        # air temperature and its rate of rise
-        t = f.get("t117_C")
-        changed |= self._set("t117", self._level_for(t, th["t117_warn_c"], th["t117_crit_c"]),
-                             "High air temperature", f"{t:.2f} °C" if t is not None else "")
-        rise = self._t_rise(now)
-        lvl = "warning" if rise is not None and rise >= th["t_rise_warn_c_per_min"] else None
-        changed |= self._set("t_rise", lvl, "Temperature rising fast", f"{rise:+.2f} °C/min" if rise is not None else "")
-        # enclosure gauge pressure
-        dp = f.get("dp_Pa")
-        changed |= self._set("dp", self._level_for(abs(dp) if dp is not None else None, th["dp_warn_pa"], th["dp_crit_pa"]),
-                             "Enclosure pressure out of range", f"{dp:+.1f} Pa" if dp is not None else "")
-        # humidity
-        rh = f.get("rh_pct")
-        changed |= self._set("rh", "warning" if rh is not None and rh >= th["rh_warn_pct"] else None,
-                             "High humidity", f"{rh:.1f} %RH" if rh is not None else "")
-        # gas resistance against the clean-air reference, every reading (no warm-up gate)
-        ratio = self._gas_ratio(f, now)
-        lvl = self._level_for(ratio, th["gas_ratio_warn"], th["gas_ratio_crit"], above=False)
-        if ratio is not None:  # a frame without a valid 320 C reading keeps the last judgement
-            changed |= self._set("gas", lvl, "Gas resistance dropped (VOC / H2 / CO rising)",
-                                 f"{f['gas_ohm'] / 1000:.1f} kΩ = {ratio * 100:.0f} % of the clean-air level "
-                                 f"({self.gas_ref / 1000:.1f} kΩ)")
         # BSEC estimates, once BSEC has some confidence (accuracy >= 1)
         confident = (f.get("iaq_acc") or 0) >= 1
         iaq = f.get("iaq") if confident else None
@@ -254,13 +230,12 @@ class Hub:
         voc = f.get("bvoc_ppm") if confident else None
         changed |= self._set("bvoc", self._level_for(voc, th["bvoc_warn_ppm"], th["bvoc_crit_ppm"]),
                              "High breath-VOC equivalent (BSEC estimate)", f"{voc:.2f} ppm" if voc is not None else "")
-        # on-board anomaly autoencoder: the module decides, we display
-        r = f.get("anomaly")
-        if f["flags"] & F_ANOMALY and r is not None:
-            changed |= self._raise("anomaly", "critical" if r > 3 else "warning", "Unusual pattern (on-board autoencoder)",
-                                   f"{r:.1f}x the learned limit")
-        else:
-            changed |= self._clear("anomaly")
+        # humidity
+        rh = f.get("rh_pct")
+        changed |= self._set("rh", "warning" if rh is not None and rh >= th["rh_warn_pct"] else None,
+                             "High humidity", f"{rh:.1f} %RH" if rh is not None else "")
+        # gas / pressure / temperature: the module's own threshold results
+        changed |= self._module_rules(f)
         # link quality
         while self.bad_times and now - self.bad_times[0] > 60:
             self.bad_times.popleft()
@@ -269,51 +244,39 @@ class Hub:
                              "Corrupted frames on the serial link", f"{n_bad} in the last minute")
         return changed
 
-    def _t_rise(self, now):
-        i = HIST_KEYS.index("t117_C")
-        pts = [(ts, h[i]) for ts, h in self.history if now - ts <= 120 and h[i] is not None]
-        if len(pts) < 10 or pts[-1][0] - pts[0][0] < 90:
-            return None
-        return (pts[-1][1] - pts[0][1]) / ((pts[-1][0] - pts[0][0]) / 60)
-
-    def _load_gas_ref(self):
-        try:
-            with open(os.path.join(self.cfg["log_dir"], "gas_reference.json")) as fh:
-                v = float(json.load(fh)["gas_ref_ohm"])
-            if v > 0:
-                print(f"gas clean-air reference {v / 1000:.1f} kΩ (tracked)", flush=True)
-                return v
-        except (OSError, ValueError, KeyError):
-            pass
-        return float(self.th["gas_ref_ohm"])
-
-    def _save_gas_ref(self, now):
-        if now - self._gas_ref_saved < 600:
-            return
-        self._gas_ref_saved = now
-        try:
-            with open(os.path.join(self.cfg["log_dir"], "gas_reference.json"), "w") as fh:
-                json.dump({"gas_ref_ohm": round(self.gas_ref, 1), "updated": datetime.now().isoformat(timespec="seconds")}, fh)
-        except OSError:
-            pass
-
-    def _gas_ratio(self, f, now):
-        """gas / clean-air reference for a valid 320 C reading, else None.
-        The reference follows slow drift (time constant gas_ref_track_hours),
-        but only from readings within -20 %/+25 % of it, so pollution never
-        becomes the new normal."""
+    def _module_rules(self, f):
+        """Alerts from the module's rules bits. A single abnormal channel gets a
+        hint from DETECTION.md about what it usually is."""
+        r = f.get("rules")
+        ids = ("t117", "t_rise", "dp", "gas", "gas_drift", "event")
         g = f.get("gas_ohm")
-        if not g or f.get("heat_c") != 320 or (f["flags"] & 0x0008):
-            return None
-        ratio = g / self.gas_ref
-        tau_h = self.th.get("gas_ref_track_hours", 0)
-        if tau_h and 0.8 <= ratio <= 1.25 and self._gas_last_ts is not None:
-            dt = min(now - self._gas_last_ts, 30.0)
-            self.gas_ref *= ratio ** (dt / (tau_h * 3600))
-            self._save_gas_ref(now)
-        self._gas_last_ts = now
-        self.gas_ratio = ratio
-        return ratio
+        if g and f.get("heat_c") == 320 and not (f["flags"] & 0x0008):
+            self.gas_ratio = g / self.th["gas_ref_ohm"]
+        if r is None:  # firmware before protocol v4: nothing judged on the module
+            return any([self._clear(a) for a in ids])
+        chans = [n for bit, n in ((R_GAS_WARN, "gas"), (R_DP_WARN, "pressure"), (R_T_WARN | R_T_RISE, "temperature"))
+                 if r & bit]
+        alone = len(chans) == 1 and not r & R_EVENT
+        t, dp = f.get("t117_C"), f.get("dp_Pa")
+        changed = False
+        changed |= self._set("t117", "critical" if r & R_T_CRIT else "warning" if r & R_T_WARN else None,
+                             "High air temperature", f"TMP117 {t:.2f} °C" if t is not None else "")
+        changed |= self._set("t_rise", "warning" if r & R_T_RISE else None, "Temperature rising fast",
+                             (f"TMP117 {t:.2f} °C" if t is not None else "") +
+                             ("; temperature alone with no gas: often sun or heating" if alone else ""))
+        changed |= self._set("dp", "critical" if r & R_DP_CRIT else "warning" if r & R_DP_WARN else None,
+                             "Enclosure pressure out of range", (f"{dp:+.1f} Pa" if dp is not None else "") +
+                             ("; pressure alone with no gas: often a door or HVAC" if alone else ""))
+        gtxt = (f"{self.gas_ratio * self.th['gas_ref_ohm'] / 1000:.1f} kΩ = {self.gas_ratio * 100:.0f} % of the "
+                f"clean-air level ({self.th['gas_ref_ohm'] / 1000:.1f} kΩ)") if self.gas_ratio else ""
+        changed |= self._set("gas", "critical" if r & R_GAS_CRIT else "warning" if r & R_GAS_WARN else None,
+                             "Gas resistance low (VOC / H2 / CO)",
+                             gtxt + ("; gas alone with no pressure: often people, perfume or solvents" if alone else ""))
+        changed |= self._set("gas_drift", "warning" if r & R_GAS_DRIFT else None,
+                             "Gas resistance low for over an hour", "possible electrolyte leak or cracked seal: inspect")
+        why = (" + ".join(chans) + " abnormal within a minute") if len(chans) >= 2 else "air temperature critical"
+        changed |= self._set("event", "critical" if r & R_EVENT else None, "Possible battery event", why)
+        return changed
 
     # ---- frames -------------------------------------------------------------------
     def on_frame(self, f, now):
@@ -332,7 +295,6 @@ class Hub:
                 self.link_ok = True
                 self._clear("link")
             f = dict(f, host_ts=now)
-            f["anomaly"] = None if f.get("anom_pct") is None else f["anom_pct"] / 100.0
             self.latest = f
             self.history.append((now, hist_row(f)))
             self._evaluate(f, now)
@@ -384,6 +346,8 @@ class Hub:
                 self._csv_w.writeheader()
             self._csv_day = day
         row = dict(f, host_time=datetime.now().isoformat(timespec="milliseconds"), flags=f"{f['flags']:04X}")
+        if f.get("rules") is not None:
+            row["rules"] = f"{f['rules']:04X}"
         self._csv_w.writerow(row)
         self._csv_f.flush()
 
@@ -397,15 +361,15 @@ class Hub:
                                 key=lambda l: LEVELS[l], default=None)
         confident = (f.get("iaq_acc") or 0) >= 1
         spec = {
-            "t117_C": (["t117", "t_rise", "sensor_TMP117"], f.get("t117_C") is not None),
-            "dp_Pa": (["dp", "sensor_ABP2"], f.get("dp_Pa") is not None),
-            "gas_ohm": (["gas", "sensor_BME688"], self.gas_ratio is not None),
+            "t117_C": (["t117", "t_rise", "sensor_TMP117"], f.get("t117_C") is not None and f.get("rules") is not None),
+            "dp_Pa": (["dp", "sensor_ABP2"], f.get("dp_Pa") is not None and f.get("rules") is not None),
+            "gas_ohm": (["gas", "gas_drift", "sensor_BME688"], self.gas_ratio is not None and f.get("rules") is not None),
             "iaq": (["iaq", "sensor_BME688", "bsec"], confident),
             "co2eq_ppm": (["co2eq", "sensor_BME688", "bsec"], confident),
             "bvoc_ppm": (["bvoc", "sensor_BME688", "bsec"], confident),
             "rh_pct": (["rh", "sensor_BME688"], f.get("rh_pct") is not None),
             "p_Pa": (["sensor_BME688"], f.get("p_Pa") is not None),
-            "anomaly": (["anomaly"], f.get("anom_pct") is not None),
+            "event": (["event"], f.get("rules") is not None),
         }
         out = {}
         for key, (ids, judgeable) in spec.items():
@@ -425,14 +389,10 @@ class Hub:
             "link": {"ok": self.link_ok, "port": self.cfg["serial_port"], "port_open": self.port_open,
                      "last_frame_age_s": None if self.last_ok is None else round(now - self.last_ok, 1)},
             "latest": self.latest,
-            "gas_ref": self.gas_ref,
+            "gas_ref": self.th["gas_ref_ohm"],
             "gas_ratio": self.gas_ratio,
             "tiles": self._tile_states(),
-            "anomaly": {"ready": (self.latest or {}).get("anom_pct") is not None,
-                        "ratio": (self.latest or {}).get("anomaly"),
-                        "alarm": bool((self.latest or {}).get("flags", 0) & F_ANOMALY),
-                        "on_module": (self.latest or {}).get("ver", 0) >= 3},
-            "alerts": alerts,
+            "rules": (self.latest or {}).get("rules"),            "alerts": alerts,
             "events": list(self.events)[-40:][::-1],
             "stats": dict(self.stats),
             "flags": {f"{k:04X}": v for k, v in FLAGS.items()},
@@ -450,16 +410,12 @@ class Hub:
             now = time.time()
             rows = [(ts, h) for ts, h in self.history if now - ts <= minutes * 60]
         buckets = {}
-        ia = HIST_KEYS.index("anomaly")
         for ts, h in rows:
             b = int(ts // bucket_s)
             acc = buckets.setdefault(b, [[0.0, 0] for _ in HIST_KEYS])
             for i, v in enumerate(h):
                 if v is not None:
-                    if i == ia:  # anomaly: the bucket's peak, so short events stay visible
-                        acc[i][0] = max(acc[i][0], v) if acc[i][1] else v
-                    else:
-                        acc[i][0] += v
+                    acc[i][0] += v
                     acc[i][1] += 1
         out = {"bucket_s": bucket_s, "t": []}
         for k in HIST_KEYS:
@@ -468,7 +424,7 @@ class Hub:
             out["t"].append((b + 0.5) * bucket_s)
             for i, k in enumerate(HIST_KEYS):
                 tot, n = buckets[b][i]
-                out[k].append(None if not n else round(tot if i == ia else tot / n, 4))
+                out[k].append(None if not n else round(tot / n, 4))
         return out
 
 

@@ -25,6 +25,10 @@ ssh "$HOST" "rm -rf $STAGE && mkdir -p $STAGE/static"
 scp -q "$HERE/bess_dashboard.py" "$ROOT/tools/bess_rx.py" "$HERE/config.json" \
        "$HERE/bess-dashboard.service" "$HERE/nginx-bess.conf" "$HOST:$STAGE/"
 scp -q "$HERE/static/index.html" "$HOST:$STAGE/static/"
+# the module's thresholds, from rules.h (the dashboard shows them; the module decides)
+python3 "$ROOT/tools/rules_json.py" > "$HERE/.rules.json"
+scp -q "$HERE/.rules.json" "$HOST:$STAGE/rules.json"
+rm -f "$HERE/.rules.json"
 
 
 ssh -T "$HOST" "sudo REPLACE_CONFIG=$REPLACE_CONFIG bash -s" <<'EOF'
@@ -34,8 +38,8 @@ D=/opt/bess-dashboard
 SITE=/etc/nginx/sites-available/default
 
 install -d -m 755 $D $D/static
-install -m 644 $S/bess_dashboard.py $S/bess_rx.py $D/
-# the anomaly model runs on the module now; remove the Pi-side copies
+install -m 644 $S/bess_dashboard.py $S/bess_rx.py $S/rules.json $D/
+# files of an earlier dashboard version (Pi-side anomaly model): remove if present
 rm -f $D/bess_features.py $D/model.json $D/model.json.prev
 install -m 644 $S/static/index.html $D/static/
 if [ -f $D/config.json ] && [ "$REPLACE_CONFIG" != 1 ]; then

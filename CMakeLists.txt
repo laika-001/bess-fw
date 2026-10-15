@@ -20,7 +20,6 @@ target_include_directories(${APP_TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/bme68x
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/bsec2/inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/ml          # anomaly_model.h, generated from ml/model.json
 )
 # Bosch BSEC2, soft-float Cortex-M4 build (see third_party/README.md).
 target_link_libraries(${APP_TARGET} mbed-os ${CMAKE_CURRENT_SOURCE_DIR}/third_party/bsec2/cortex-m4/libalgobsec.a)

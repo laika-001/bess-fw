@@ -4,7 +4,7 @@ cmake_build/
 # mbed-os is its own git checkout, pinned by mbed-os.lib; tools/setup_mac.sh clones it
 mbed-os/
 
-# Sensor data: per-run logs from tools/bess_rx.py (large; the trained model is in ml/model.json)
+# Sensor data: per-run logs from tools/bess_rx.py (large)
 logs/
 healthy_*.csv
 
@@ -29,3 +29,7 @@ third_party/bsec2/*
 
 # Local working documents (not published)
 submission/
+
+# Generated at deploy from rules.h
+pi/rules.json
+pi/.rules.json

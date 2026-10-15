@@ -4,18 +4,20 @@ Firmware and gateway for a battery energy storage (BESS) enclosure monitor.
 
 - **Module** (MAX32630FTHR, mbed-os): reads a TMP117 (air temperature), a Honeywell
   ABP2 (enclosure gauge pressure) and a Bosch BME688 (gas, humidity, barometric
-  pressure; IAQ / CO₂-equivalent / breath-VOC estimates through Bosch BSEC2), runs
-  an anomaly-detection autoencoder on board, and sends one checked data frame every
-  3 s over USB and UART. A hardware watchdog resets it if a sensor or the firmware stops.
+  pressure; IAQ / CO₂-equivalent / breath-VOC estimates through Bosch BSEC2), checks
+  them on board against thermal-runaway signature thresholds, and sends one checked
+  data frame every 3 s over USB and UART. A hardware watchdog resets it if a sensor or the firmware stops.
 - **Gateway** (Raspberry Pi 5): live web dashboard with alerts, trends and CSV logs.
-- **Model training**: trains the autoencoder on healthy logged data and
-  generates the weights the firmware compiles in.
+- **Detection**: fixed thresholds on gas, enclosure pressure and temperature, decided
+  on the module; the battery-event alarm needs two channels within a minute. See
+  [DETECTION.md](DETECTION.md). After real testing we will decide whether an
+  autoencoder is the better approach.
 
 | Where | What |
 |---|---|
 | [SETUP.md](SETUP.md) | Setup, hardware wiring, daily commands, board gotchas, data protocol |
 | [pi/README.md](pi/README.md) | Raspberry Pi dashboard: wiring, service, deploy, alert rules |
-| [ml/README.md](ml/README.md) | Anomaly autoencoder: features, training, checking, flashing |
+| [DETECTION.md](DETECTION.md) | Thermal-runaway signatures, the threshold rules, replay results |
 | [third_party/README.md](third_party/README.md) | Third-party code and licenses |
 
 macOS was used for this project.

@@ -47,8 +47,8 @@ file, and asks you to accept Bosch's terms first. Setup runs it; to run it on it
 own: `tools/fetch_bsec.sh` (or `--accept-bosch-license` to skip the prompt).
 Bosch's open-source BME68x driver (BSD-3-Clause) is included in `third_party/bme68x/`.
 
-**Raspberry Pi dashboard and anomaly model:** see `pi/README.md` (gateway wiring,
-service, deploy) and `ml/README.md` (training the on-board autoencoder).
+**Raspberry Pi dashboard and detection rules:** see `pi/README.md` (gateway wiring,
+service, deploy) and `DETECTION.md` (what the module checks and why).
 
 ### Moving an existing checkout
 
@@ -110,6 +110,8 @@ ports; the scripts find it automatically.
 | `bessflash.sh`, `monitor.sh`, `clear_pmic_bus.sh` | The commands above |
 | `fetch_bsec.sh` | Downloads Bosch BSEC2 (not redistributed here) and checks its checksums |
 | `bess_rx.py` | Receives, checks and logs the `$BESS` frames |
+| `check_rules.py` | Replays logged frames through `rules.h` to show what each threshold would have done |
+| `rules_json.py` | Extracts the thresholds from `rules.h` for the Pi dashboard (run by `pi/deploy.sh`) |
 
 ## Board gotchas (learned the hard way)
 
@@ -142,22 +144,22 @@ ports; the scripts find it automatically.
 - **Build output:** mbed-tools prints `FAILED: bess-blinky.elf` from its memory-report
   step even on success; `bessflash.sh` checks for the `-- built:` line instead.
 
-## Data protocol (v3)
+## Data protocol (v4)
 
 Every 3 s (the cycle is timed by BSEC) the firmware sends one line on the USB serial
 port, after the debug text:
 
 ```
-$BESS,2,<seq>,<up_ms>,<flags>,<t117_cC>,<dp_cPa>,<tabp_cC>,<tbme_cC>,<p_Pa>,<rh_cP>,<gas_ohm>,<heat_c>,<iaq_c>,<iaq_acc>,<siaq_c>,<co2eq_cppm>,<bvoc_ppb>,<bsec_st>,<anom_pct>*<CRC16>
+$BESS,4,<seq>,<up_ms>,<flags>,<t117_cC>,<dp_cPa>,<tabp_cC>,<tbme_cC>,<p_Pa>,<rh_cP>,<gas_ohm>,<heat_c>,<iaq_c>,<iaq_acc>,<siaq_c>,<co2eq_cppm>,<bvoc_ppb>,<bsec_st>,<rules>*<CRC16>
 ```
 
 Integer fixed-point values (cC = 0.01 °C, cPa = 0.01 Pa, cP = 0.01 %RH), empty when
 a sensor read failed, CRC-16/CCITT-FALSE over the bytes between `$` and `*`. The
 frame doubles as the heartbeat: no valid frame for 6 s = fault. Field and flag
 definitions are in `bess_proto.h`; `tools/bess_rx.py` is the reference receiver and
-also reads v1 frames (firmware before BSEC, ending at `gas_ohm`) and v2 (before the
-on-board anomaly score, ending at `bsec_st`). `anom_pct` is the on-board autoencoder's
-score, % of its learned limit; see `ml/README.md`.
+also reads the older versions (v1 ends at `gas_ohm`, v2 at `bsec_st`, v3 carried a
+since-removed autoencoder score). `rules` is 4 hex digits of the module's threshold
+results; flag 0x0020 means possible battery event. See `DETECTION.md`.
 
 ## BME688 and BSEC
 
@@ -200,9 +202,8 @@ re-soldering, re-mounting or replacing the sensor, and now and then in service:
 - `main.cpp`: the firmware that gets built.
 - `bess_proto.h`: the data frame encoder (no mbed dependencies).
 - `bme_bsec.cpp`, `bme_bsec.h`: BME688 through Bosch's driver and BSEC2, with the flash-saved state.
-- `anomaly.h`: the on-board anomaly autoencoder (features + inference, no mbed code).
-- `ml/`: training for it (`train_autoencoder.py`), the model and its generated header,
-  and the firmware-vs-Python check; see `ml/README.md`.
+- `rules.h`: the on-board threshold checks and the thresholds themselves (no mbed code);
+  see `DETECTION.md`. `tools/check_rules.py` replays logs through it.
 - `pi/`: the Raspberry Pi gateway dashboard (UART link, service, nginx, deploy script); see `pi/README.md`.
 - `third_party/`: Bosch BME68x driver and BSEC2 files, with their licenses (see its README).
 - `main_hand_bme688.cpp`: main.cpp before BSEC, with the hand-written BME688 code.

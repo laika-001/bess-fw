@@ -52,21 +52,31 @@ the previous site if the test fails), restarts the service and checks it answers
 
 ## Alerts
 
-| Alert | Level | Rule (defaults in `config.json`) |
-|---|---|---|
-| No data from the module | critical | no valid frame for 6 s |
-| TMP117 / ABP2 / BME688 read failed | critical | firmware failure flag set |
-| High air temperature | warning / critical | TMP117 >= 45 / 60 °C |
-| Temperature rising fast | warning | TMP117 rises >= 1 °C per minute over 2 min |
-| Enclosure pressure out of range | warning / critical | abs(dP) >= 50 / 200 Pa |
-| Gas resistance dropped | warning / critical | every 320 °C reading <= 60 / 35 % of the clean-air level (`gas_ref_ohm`, 63.1 kΩ: median of the healthy night). No warm-up gate. The level follows slow sensor drift (`gas_ref_track_hours`, 24 h) only from readings within -20/+25 % of it, so pollution never becomes the new normal; the tracked value is kept in `/var/lib/bess-dashboard/gas_reference.json` |
-| Poor air quality | warning / critical | BSEC IAQ >= 150 / 250, once accuracy >= 1 |
-| High CO2 equivalent | warning / critical | BSEC CO2-eq >= 1000 / 2000 ppm, once accuracy >= 1 (an estimate, not measured CO2) |
-| High breath-VOC equivalent | warning / critical | BSEC bVOC-eq >= 2 / 5 ppm, once accuracy >= 1 |
-| High humidity | warning | RH >= 85 % |
-| Unusual pattern (on-board autoencoder) | warning / critical | the module's alarm flag (score above its learned limit for 15 s); critical above 3x. See `../ml/README.md` |
-| BSEC not running | warning | firmware BSEC flag |
-| Corrupted frames | warning | >= 3 bad frames in a minute |
+Gas, enclosure pressure and air temperature are judged **on the module** (`../rules.h`,
+see `../DETECTION.md`); the dashboard shows the module's results and doesn't re-judge
+them. Their numbers come from `rules.h` at deploy time (`rules.json`), so the module
+and the dashboard can't disagree. The Pi judges only humidity, the BSEC estimates
+and the data link, with the limits in `config.json`.
+
+| Alert | Level | Rule | Decided by |
+|---|---|---|---|
+| Possible battery event | critical | two of gas / pressure / temperature outside their limits within 1 minute, or air temperature ≥ 60 °C | module |
+| Gas resistance low | warning / critical | 320 °C reading ≤ 60 / 35 % of the clean-air level (63.1 kΩ) | module |
+| Gas resistance low for over an hour | warning | ≤ 80 % for 1 h: possible leak or cracked seal | module |
+| Enclosure pressure out of range | warning / critical | \|ΔP\| ≥ 50 / 200 Pa | module |
+| High air temperature | warning / critical | TMP117 ≥ 45 / 60 °C | module |
+| Temperature rising fast | warning | ≥ 1 °C/min over 2 min | module |
+| No data from the module | critical | no valid frame for 6 s | Pi |
+| TMP117 / ABP2 / BME688 read failed | critical | firmware failure flag set | Pi (module flag) |
+| Poor air quality | warning / critical | BSEC IAQ ≥ 150 / 250, once accuracy ≥ 1 | Pi |
+| High CO2 equivalent | warning / critical | BSEC CO2-eq ≥ 1000 / 2000 ppm, once accuracy ≥ 1 (an estimate, not measured CO2) | Pi |
+| High breath-VOC equivalent | warning / critical | BSEC bVOC-eq ≥ 2 / 5 ppm, once accuracy ≥ 1 | Pi |
+| High humidity | warning | RH ≥ 85 % | Pi |
+| BSEC not running | warning | firmware BSEC flag | Pi (module flag) |
+| Corrupted frames | warning | ≥ 3 bad frames in a minute | Pi |
+
+A single gas, pressure or temperature alert carries a hint about what it usually is
+on its own (people or solvents; a door or HVAC; sun or heating).
 
 Module reboots (and watchdog reboots) are logged as events.
 
@@ -74,6 +84,8 @@ Module reboots (and watchdog reboots) are logged as events.
 
 - **Temperature is the TMP117 only.** The BME688 chip and ABP2 die temperatures are
   still in the frames and the CSV logs, but not shown.
+- **The battery event check** at the top shows the module's verdict and the three
+  channels it combines.
 - **Tile colour = the alert rules above**: OK (green), Warning (amber), Critical (red),
   each with an icon and label. Grey means not judged yet: "Calibrating" for the BSEC values
   at accuracy 0 (it restarts at each module boot).
