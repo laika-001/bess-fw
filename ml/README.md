@@ -32,7 +32,7 @@ days that include normal daytime, with nothing unusual going on.
 ## Retrain and deploy
 
 ```bash
-# 1. train on a healthy period (Mac logs or the Pi's /var/lib/bess-dashboard CSVs)
+# 1. train on a healthy period (logs/ from tools/bess_rx.py, or the Pi's /var/lib/bess-dashboard CSVs)
 /opt/homebrew/bin/python3 ml/train_autoencoder.py --csv 'logs/*.csv' \
     --train 2026-10-16T00:00 2026-10-18T00:00 --test 2026-10-18T00:00 2026-10-18T12:00
 # 2. check the firmware code matches the Python reference on real frames

@@ -1,11 +1,11 @@
-# BESS firmware: setup on a new Mac
+# BESS firmware: setup
 
 Firmware for the MAX32630FTHR: WDT0 watchdog plus BME688, TMP117 and ABP2 sensors on I2C1.
 Built with mbed-os (CMake + GCC ARM), flashed with pyocd over the board's DAPLink USB.
 
-## Setup on a new Mac (from a fresh clone)
+## Setup
 
-You need: a Mac with Homebrew (https://brew.sh) and the Xcode Command Line Tools
+You need: Homebrew (https://brew.sh) and the Xcode Command Line Tools
 (`xcode-select --install`); the MAX32630FTHR with a MAX32625PICO debug adapter
 (10-pin SWD ribbon) and its own USB cable for power; the sensors wired as in
 "Hardware" below.
@@ -50,10 +50,10 @@ Bosch's open-source BME68x driver (BSD-3-Clause) is included in `third_party/bme
 **Raspberry Pi dashboard and anomaly model:** see `pi/README.md` (gateway wiring,
 service, deploy) and `ml/README.md` (training the on-board autoencoder).
 
-### Moving an existing checkout to another Mac
+### Moving an existing checkout
 
 Copy the folder (you can leave out `cmake_build/` and the ~860 MB `mbed-os/`), or
-just clone again, then run step 2 above.
+clone again, then run step 2 above.
 
 Requires Homebrew (https://brew.sh) and the Xcode Command Line Tools (`xcode-select --install`).
 
@@ -67,7 +67,7 @@ file next to it, then install it and re-run setup. Setup skips the cask once
 sudo installer -pkg arm-gnu-toolchain-<version>-darwin-arm64-arm-none-eabi.pkg -target /
 ```
 
-If that installer sits silent for minutes, unplug the board: macOS checks every
+If that installer sits silent for minutes, unplug the board: the OS checks every
 mounted drive first and can hang on the board's DAPLINK drive.
 
 ## Hardware
@@ -75,7 +75,7 @@ mounted drive first and can hang on the board's DAPLINK drive.
 | Part | Connection | I2C address |
 |---|---|---|
 | MAX32630FTHR | main board; its own USB cable powers it | |
-| MAX32625PICO | debug adapter: USB to the Mac, 10-pin SWD ribbon to the FTHR, stripe on pin 1 at both ends | |
+| MAX32625PICO | debug adapter: USB to the computer, 10-pin SWD ribbon to the FTHR, stripe on pin 1 at both ends | |
 | Adafruit BME688 (STEMMA QT, #5046) | I2C1: SDA (blue, "SDI") to P3_4, SCL (yellow, "SCK") to P3_5, VIN (red) to **3V3**, GND | 0x77 |
 | TMP117 | same I2C1 bus, 3V3, GND | 0x48 |
 | Honeywell ABP2DANT001PG2A3XX (bare DIP) | same I2C1 bus; pin 1 GND, 2 VDD (3V3), 5 SDA, 6 SCL | 0x28 |
@@ -105,7 +105,7 @@ ports; the scripts find it automatically.
 | `setup_mac.sh` | One-time setup, described above |
 | `Brewfile` | `cmake`, `ninja`, `gcc-arm-embedded` |
 | `requirements.txt` | Pinned Python packages (mbed-tools 7.59.0, pyocd 0.45.1 and dependencies) |
-| `wheels/` | Those packages as offline wheels for Apple silicon + Python 3.9. On a different Python, setup falls back to PyPI with the same pins. |
+| `wheels/` | Those packages as offline wheels for arm64 + Python 3.9. On a different Python, setup falls back to PyPI with the same pins. |
 | `env.sh` | Shared paths used by the other scripts |
 | `bessflash.sh`, `monitor.sh`, `clear_pmic_bus.sh` | The commands above |
 | `fetch_bsec.sh` | Downloads Bosch BSEC2 (not redistributed here) and checks its checksums |
@@ -131,7 +131,7 @@ ports; the scripts find it automatically.
   MAX32625PICO adapter can't reach the MAX32630 over the 10-pin ribbon. The serial
   console can still work (it uses a different ribbon wire), so a live console does
   not prove the debug wires are connected. Reseat the ribbon at both ends with the
-  stripe on pin 1 and all ten pins in, or swap the ribbon. To confirm from the Mac:
+  stripe on pin 1 and all ten pins in, or swap the ribbon. To confirm:
   copy `bess-blinky.bin` onto the DAPLINK drive; if `FAIL.TXT` then says
   "FAILED to reset/halt the target MCU", the adapter can't drive the board's
   SWD wires at all. Pin 1 of the ribbon (target voltage sense, red stripe) is the

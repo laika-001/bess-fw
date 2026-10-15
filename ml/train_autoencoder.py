@@ -50,7 +50,7 @@ def load_frames(patterns):
                     f["flags"] = int(r.get("flags") or "0", 16)
                     rows.append((ts, f))
     rows.sort(key=lambda x: x[0])
-    # the Mac logger and the Pi both log the same frames: keep one per (seq, up_ms)
+    # the USB logger and the Pi both log the same frames: keep one per (seq, up_ms)
     out, seen = [], set()
     for ts, f in rows:
         key = (f["seq"], f["up_ms"])

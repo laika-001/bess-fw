@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of the BESS firmware toolchain on a new Mac.
+# One-time setup of the BESS firmware toolchain (macOS).
 # Safe to re-run: every step checks before it changes anything.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
@@ -33,7 +33,7 @@ fi
 "$BESS_VENV/bin/python3" --version
 
 step "Python packages (mbed-tools, pyocd, ...)"
-# The wheels in tools/wheels are for Apple silicon + Python 3.9. On anything
+# The wheels in tools/wheels are for arm64 + Python 3.9. On anything
 # else, fall back to downloading the same pinned versions from PyPI.
 if ! "$BESS_VENV/bin/pip" install -q --no-index --find-links tools/wheels -r tools/requirements.txt; then
     echo "offline install failed; downloading the pinned versions from PyPI instead"

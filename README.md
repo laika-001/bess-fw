@@ -8,15 +8,17 @@ Firmware and gateway for a battery energy storage (BESS) enclosure monitor.
   an anomaly-detection autoencoder on board, and sends one checked data frame every
   3 s over USB and UART. A hardware watchdog resets it if a sensor or the firmware stops.
 - **Gateway** (Raspberry Pi 5): live web dashboard with alerts, trends and CSV logs.
-- **Model training** (Mac): trains the autoencoder on healthy logged data and
+- **Model training**: trains the autoencoder on healthy logged data and
   generates the weights the firmware compiles in.
 
 | Where | What |
 |---|---|
-| [SETUP.md](SETUP.md) | Setup on a new Mac, hardware wiring, daily commands, board gotchas, data protocol |
+| [SETUP.md](SETUP.md) | Setup, hardware wiring, daily commands, board gotchas, data protocol |
 | [pi/README.md](pi/README.md) | Raspberry Pi dashboard: wiring, service, deploy, alert rules |
 | [ml/README.md](ml/README.md) | Anomaly autoencoder: features, training, checking, flashing |
 | [third_party/README.md](third_party/README.md) | Third-party code and licenses |
+
+macOS was used for this project.
 
 ## Quick start
 

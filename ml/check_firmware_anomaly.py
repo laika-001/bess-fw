@@ -4,7 +4,7 @@ the Python reference (ml/bess_features.py + ml/model.json), frame by frame.
 
   python3 ml/check_firmware_anomaly.py --csv 'logs/*.csv'
 
-Builds anomaly.h for the Mac with clang++, feeds both implementations the same
+Builds anomaly.h for the host with clang++, feeds both implementations the same
 logged frames on the module clock, and compares readiness, features, scores
 and the alarm flag. Run it after every retrain, before flashing.
 
